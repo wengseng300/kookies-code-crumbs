@@ -539,7 +539,7 @@ export default function App() {
   // Maps custom string hobby icons to Lucide Icons
   const renderHobbyIcon = (iconName: string) => {
     switch (iconName) {
-      case "Cat": return <Cat className="w-5 h-5 text-indigo-400" />;
+      case "Cats": return <Cat className="w-5 h-5 text-indigo-400" />;
       case "Keyboard": return <Keyboard className="w-5 h-5 text-indigo-400" />;
       case "TrendingUp": return <TrendingUp className="w-5 h-5 text-[#06b6d4]" />;
       case "Type": return <Type className="w-5 h-5 text-[#818cf8]" />;
