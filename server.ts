@@ -1,0 +1,320 @@
+import express from "express";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
+import { createServer as createViteServer } from "vite";
+import { GoogleGenAI } from "@google/genai";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
+
+  app.use(express.json());
+
+  // API Route to download the PDF resume
+  app.get("/api/download-resume", (req, res) => {
+    const filePath = path.join(process.cwd(), "src", "data", "2026KWS_Resume.pdf");
+    console.log(`[DOWNLOAD] Request received for /api/download-resume. Path: ${filePath}`);
+    if (fs.existsSync(filePath)) {
+      const stats = fs.statSync(filePath);
+      console.log(`[DOWNLOAD] PDF file exists on disk. Size: ${stats.size} bytes`);
+
+      // Prevent browser / service worker caching the first request or errors
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+
+      // Force direct download as attachment
+      res.setHeader("Content-Disposition", "attachment; filename=2026KWS_Resume.pdf");
+      res.setHeader("Content-Type", "application/pdf");
+      res.sendFile(filePath, (err) => {
+        if (err) {
+          console.error("[DOWNLOAD] Error sending file:", err);
+        } else {
+          console.log("[DOWNLOAD] File sent successfully.");
+        }
+      });
+    } else {
+      console.log(`[DOWNLOAD] PDF file not found at ${filePath}`);
+      res.status(404).send("Resume PDF file not found.");
+    }
+  });
+
+  // API Route for asking professional profile questions
+  app.post("/api/ask", async (req, res) => {
+    const { query } = req.body;
+
+    if (!query || typeof query !== "string" || !query.trim()) {
+      return res.status(400).json({ error: "Query is required" });
+    }
+
+    try {
+      console.log("Attempt to get key for API call");
+
+
+      // Lazy load Gemini API Key and throw elegant errors
+      const apiKey = process.env.GEMIMI_API_KEY;
+      if (!apiKey) {
+        console.warn("GEMINI_API_KEY environment variable is not defined.");
+        return res.status(500).json({          
+          error: "Gemini API key is not configured.",
+          text: "I'm sorry, my AI query server is currently starting or configured incorrectly. Please check back shortly or select standard navigation links!"
+        });
+      }
+
+      // Read portfolio markdown as full context for RAG
+      const portfolioPath = path.join(process.cwd(), "src", "data", "portfolio.md");
+      let portfolioMarkdown = "";
+      try {
+        portfolioMarkdown = fs.readFileSync(portfolioPath, "utf-8");
+      } catch (err) {
+        console.error("Failed to read portfolio.md context path:", err);
+        return res.status(500).json({ error: "Failed to load resume context." });
+      }
+
+      // Initialize Gemini using correct @google/genai syntax and required telemetry headers
+      console.log("[API ASK] Initializing GoogleGenAI client");
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          }
+        }
+      });
+
+      // Prompt optimized for concise, natural RAG retrieval and strict missing-item handling
+      const systemInstruction = `You are Koo Weng Seng, a Senior Full-Stack Software Engineer.
+Using only the provided resume and portfolio markdown document as your source of truth, answer the user's question.
+
+Portfolio/Resume Markdown Source:
+${portfolioMarkdown}
+
+Core Directive Guidelines:
+1. Speak in the first person ("I", "my projects", "my INTI college") with a professional, friendly, and natural conversational tone.
+2. If the user asks about a skill, library, framework, or topic that is explicitly listed as NOT familiar (such as Laravel, PHP, Vue, Svelte, Angular, Ruby, Kubernetes, Go, Django, Flask), or is completely unmentioned inside the document, you MUST explicitly state that you are not familiar with it. For example, say: "I'm sorry, I'm not familiar with [Topic Name]" or "I'm not familiar with [Topic Name] as my focus is primarily on React, TypeScript, and the Node.js ecosystem."
+3. You can compile and synthesize your answer from multiple different sections of the document if necessary (e.g. for "How familiar are you with SQL?").
+4. Keep the response concise, punchy, and highly readable, formatted in clean Markdown. Avoid extremely long-winded paragraphs. Prefer list bullets if breaking down multi-part achievements.
+`;
+
+      console.log("[API ASK] Sending request to Gemini model (gemini-2.5-flash)");
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: query.trim(),
+        config: {
+          systemInstruction,
+          temperature: 0.2, // Low temperature for precise RAG factual outputs
+        }
+      });
+
+      console.log("[API ASK] Gemini response received", { ok: !!response, keys: response && Object.keys(response || {}) });
+      const responseText = response?.text || "I'm sorry, I couldn't formulate a proper response. Please try again.";
+      return res.json({ text: responseText });
+
+    } catch (err) {
+      console.error("Gemini RAG Generation Error:", err && err.message ? err.message : err);
+      if (err && err.stack) console.error(err.stack);
+      // Log common axios-style response details if present
+      if (err && err.response) {
+        try {
+          console.error("Error response status:", err.response.status);
+          console.error("Error response data:", JSON.stringify(err.response.data, null, 2));
+        } catch (e) {
+          console.error("Failed to stringify err.response", e);
+        }
+      }
+
+      return res.status(500).json({
+        error: err?.message || "Failed to process question via AI",
+        text: "I apologize, but I encountered an error searching my knowledge base. Please ask something else!"
+      });
+    }
+  });
+
+  // Vite middleware for development vs static serve for production
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server successfully started on http://0.0.0.0:${PORT} in ${process.env.NODE_ENV || "development"} mode`);
+  });
+}
+
+startServer();
+import express from "express";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
+import { createServer as createViteServer } from "vite";
+import { GoogleGenAI } from "@google/genai";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
+
+  app.use(express.json());
+
+  // API Route to download the PDF resume
+  app.get("/api/download-resume", (req, res) => {
+    const filePath = path.join(process.cwd(), "src", "data", "2026KWS_Resume.pdf");
+    console.log(`[DOWNLOAD] Request received for /api/download-resume. Path: ${filePath}`);
+    if (fs.existsSync(filePath)) {
+      const stats = fs.statSync(filePath);
+      console.log(`[DOWNLOAD] PDF file exists on disk. Size: ${stats.size} bytes`);
+
+      // Prevent browser / service worker caching the first request or errors
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+
+      // Force direct download as attachment
+      res.setHeader("Content-Disposition", "attachment; filename=2026KWS_Resume.pdf");
+      res.setHeader("Content-Type", "application/pdf");
+      res.sendFile(filePath, (err) => {
+        if (err) {
+          console.error("[DOWNLOAD] Error sending file:", err);
+        } else {
+          console.log("[DOWNLOAD] File sent successfully.");
+        }
+      });
+    } else {
+      console.log(`[DOWNLOAD] PDF file not found at ${filePath}`);
+      res.status(404).send("Resume PDF file not found.");
+    }
+  });
+
+  // API Route for asking professional profile questions
+  app.post("/api/ask", async (req, res) => {
+    const { query } = req.body;
+
+    if (!query || typeof query !== "string" || !query.trim()) {
+      return res.status(400).json({ error: "Query is required" });
+    }
+
+    try {
+      console.log("Attempt to get key for API call");
+
+
+      // Lazy load Gemini API Key and throw elegant errors
+      const apiKey = process.env.GEMIMI_API_KEY;
+      if (!apiKey) {
+        console.warn("GEMINI_API_KEY environment variable is not defined.");
+        return res.status(500).json({          
+          error: "Gemini API key is not configured.",
+          text: "I'm sorry, my AI query server is currently starting or configured incorrectly. Please check back shortly or select standard navigation links!"
+        });
+      }
+
+      // Read portfolio markdown as full context for RAG
+      const portfolioPath = path.join(process.cwd(), "src", "data", "portfolio.md");
+      let portfolioMarkdown = "";
+      try {
+        portfolioMarkdown = fs.readFileSync(portfolioPath, "utf-8");
+      } catch (err) {
+        console.error("Failed to read portfolio.md context path:", err);
+        return res.status(500).json({ error: "Failed to load resume context." });
+      }
+
+      // Initialize Gemini using correct @google/genai syntax and required telemetry headers
+      console.log("[API ASK] Initializing GoogleGenAI client");
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          }
+        }
+      });
+
+      // Prompt optimized for concise, natural RAG retrieval and strict missing-item handling
+      const systemInstruction = `You are Koo Weng Seng, a Senior Full-Stack Software Engineer.
+Using only the provided resume and portfolio markdown document as your source of truth, answer the user's question.
+
+Portfolio/Resume Markdown Source:
+${portfolioMarkdown}
+
+Core Directive Guidelines:
+1. Speak in the first person ("I", "my projects", "my INTI college") with a professional, friendly, and natural conversational tone.
+2. If the user asks about a skill, library, framework, or topic that is explicitly listed as NOT familiar (such as Laravel, PHP, Vue, Svelte, Angular, Ruby, Kubernetes, Go, Django, Flask), or is completely unmentioned inside the document, you MUST explicitly state that you are not familiar with it. For example, say: "I'm sorry, I'm not familiar with [Topic Name]" or "I'm not familiar with [Topic Name] as my focus is primarily on React, TypeScript, and the Node.js ecosystem."
+3. You can compile and synthesize your answer from multiple different sections of the document if necessary (e.g. for "How familiar are you with SQL?").
+4. Keep the response concise, punchy, and highly readable, formatted in clean Markdown. Avoid extremely long-winded paragraphs. Prefer list bullets if breaking down multi-part achievements.
+`;
+
+      console.log("[API ASK] Sending request to Gemini model (gemini-2.5-flash)");
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: query.trim(),
+        config: {
+          systemInstruction,
+          temperature: 0.2, // Low temperature for precise RAG factual outputs
+        }
+      });
+
+      console.log("[API ASK] Gemini response received", { ok: !!response, keys: response && Object.keys(response || {}) });
+      const responseText = response?.text || "I'm sorry, I couldn't formulate a proper response. Please try again.";
+      return res.json({ text: responseText });
+
+    } catch (err: any) {
+      console.error("Gemini RAG Generation Error:", err && err.message ? err.message : err);
+      if (err && (err as any).stack) console.error((err as any).stack);
+      // Log common axios-style response details if present
+      if ((err as any).response) {
+        try {
+          console.error("Error response status:", (err as any).response.status);
+          console.error("Error response data:", JSON.stringify((err as any).response.data, null, 2));
+        } catch (e) {
+          console.error("Failed to stringify err.response", e);
+        }
+      }
+
+      return res.status(500).json({
+        error: err?.message || "Failed to process question via AI",
+        text: "I apologize, but I encountered an error searching my knowledge base. Please ask something else!"
+      });
+    }
+  });
+
+  // Vite middleware for development vs static serve for production
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server successfully started on http://0.0.0.0:${PORT} in ${process.env.NODE_ENV || "development"} mode`);
+  });
+}
+
+startServer();
