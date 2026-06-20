@@ -1,0 +1,6 @@
+{
+  "name": "Kookie's Code Crumbs",
+  "description": "Welcome to Kookie's Code Crumbs! Ask me anything about my work experience, education, projects, skills, and hobbies via typing or with voice speech in AI response.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
