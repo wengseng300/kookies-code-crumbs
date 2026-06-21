@@ -57,9 +57,11 @@ async function startServer() {
 
     try {
       // Lazy load Gemini API Key and throw elegant errors
-      const apiKey = process.env.VITE_GEMINI_API_KEY; // Works in Node.js environment with dotenv
+      const apiKey = process.env.GEMINI_API_KEY; // Works in Node.js environment with dotenv
       //const apiKey = process.env.VITE_GEMINI_API_KEY; 
       //const apiKey = import.meta.env.VITE_GEMINI_API_KEY; // Only works in Vite-bundled browser code
+      // console.log("process.env: ", process.env);
+      // console.log("import.meta.env: ", import.meta.env);
       console.log("GEMINI_API_KEY loaded:", !!apiKey, apiKey ? "Key length: " + apiKey.length : "No key found");
       if (!apiKey) {
         console.warn("GEMINI_API_KEY environment variable is not defined.");
