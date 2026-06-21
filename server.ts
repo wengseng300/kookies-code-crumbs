@@ -9,8 +9,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// const __filename = fileURLToPath(import.meta.url);
+// const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
@@ -56,11 +56,11 @@ async function startServer() {
     }
 
     try {
-      console.log("Attempt to get key for API call");
-
-
       // Lazy load Gemini API Key and throw elegant errors
-      const apiKey = process.env.GEMIMI_API_KEY;
+      const apiKey = process.env.VITE_GEMINI_API_KEY; // Works in Node.js environment with dotenv
+      //const apiKey = process.env.VITE_GEMINI_API_KEY; 
+      //const apiKey = import.meta.env.VITE_GEMINI_API_KEY; // Only works in Vite-bundled browser code
+      console.log("GEMINI_API_KEY loaded:", !!apiKey, apiKey ? "Key length: " + apiKey.length : "No key found");
       if (!apiKey) {
         console.warn("GEMINI_API_KEY environment variable is not defined.");
         return res.status(500).json({          
