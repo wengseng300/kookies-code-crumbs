@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import path from "path";
-import fs from "fs";
+import fs from "fs";  
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   const filePath = path.join(process.cwd(), "src", "data", "2026KWS_Resume.pdf");
