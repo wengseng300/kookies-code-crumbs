@@ -823,7 +823,7 @@ export default function App() {
                               </div>
                             </div>
                             <p className="text-xs sm:text-sm font-mono text-slate-500 tracking-wider uppercase animate-pulse mt-3">
-                              Alex AI Agent is searching resume context ...
+                              Koo AI Agent is searching resume context ...
                             </p>
                           </div>
                         ) : (
